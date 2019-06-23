@@ -1,0 +1,833 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Metadata": {
+    },
+    "Resources": {
+        "VPC": {
+            "Type": "AWS::EC2::VPC",
+            "Properties": {
+                "EnableDnsSupport": "true",
+                "EnableDnsHostnames": "true",
+                "CidrBlock": "10.0.0.0/16"
+            },
+            "Metadata": {
+            }
+        },
+        "PublicSubnet": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "AvailabilityZone": "us-west-1b",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "CidrBlock": "10.0.0.0/24"
+            },
+            "Metadata": {
+            }
+        },
+        "WebServerSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "GroupDescription": "Allow access from HTTP from ALB and SSH traffic",
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "80",
+                        "ToPort": "80",
+                        "SourceSecurityGroupId": {
+                            "Ref": "PublicLoadBalancerSecurityGroup"
+                        }
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "22",
+                        "ToPort": "22",
+                        "CidrIp": {
+                            "Ref": "SSHLocation"
+                        }
+                    }
+                ]
+            },
+            "Metadata": {
+            }
+        },
+        "InternetGateway": {
+            "Type": "AWS::EC2::InternetGateway",
+            "Properties": {},
+            "Metadata": {
+            }
+        },
+        "PublicRouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            },
+            "Metadata": {
+            },
+            "DependsOn": [
+                "PublicSubnet", "PublicSubnet2"
+            ]
+        },
+        "PublicRoute": {
+            "Type": "AWS::EC2::Route",
+            "Properties": {
+                "DestinationCidrBlock": "0.0.0.0/0",
+                "RouteTableId": {
+                    "Ref": "PublicRouteTable"
+                },
+                "GatewayId": {
+                    "Ref": "InternetGateway"
+                }
+            },
+            "Metadata": {
+            },
+            "DependsOn": [
+                "EC2VPCG23WX7"
+            ]
+        },
+        "EC2SRTA2KSE5": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "SubnetId": {
+                    "Ref": "PublicSubnet"
+                },
+                "RouteTableId": {
+                    "Ref": "PublicRouteTable"
+                }
+            },
+            "Metadata": {
+            }
+        },
+        "EC2VPCG23WX7": {
+            "Type": "AWS::EC2::VPCGatewayAttachment",
+            "Properties": {
+                "InternetGatewayId": {
+                    "Ref": "InternetGateway"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            },
+            "Metadata": {
+            }
+        },
+        "WebServerFleet": {
+            "Type": "AWS::AutoScaling::AutoScalingGroup",
+            "Properties": {
+                "MinSize": "1",
+                "MaxSize": "10",
+                "DesiredCapacity": {
+                    "Ref": "WebServerCount"
+                },
+                "VPCZoneIdentifier": [
+                    {
+                        "Ref": "PublicSubnet"
+                    },
+		            { 
+                        "Ref": "PublicSubnet2" 
+                    }
+                ],
+                "LaunchConfigurationName": {
+                    "Ref": "WebServerLaunchConfig"
+                },
+                "TargetGroupARNs": [
+                    {
+                        "Ref": "ALBTargetGroup"
+                    }
+                ]
+            },
+            "UpdatePolicy" : {
+                "AutoScalingRollingUpdate" : {
+                    "MinInstancesInService" : "1",
+                    "PauseTime" : "PT2M"                    
+                }
+            },
+            "Metadata": {
+            },
+            "DependsOn": [
+                "PublicRoute"
+            ]
+        },
+        "WebServerLaunchConfig": {
+            "Type": "AWS::AutoScaling::LaunchConfiguration",
+            "Properties": {
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap": [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Ref": "InstanceType"
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "AssociatePublicIpAddress": "true",
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "yum install httpd -y\n",
+                                "service httpd start && chkconfig httpd on\n",
+                                "cd /var/www/html\n",
+                                "echo '<html><h1>Health Checker: OK</h1><img src='https://d5zbgtndvsb4j.cloudfront.net/Rick-Roll-796x394.png '/><h3>' > index.html\n",
+                                "curl 169.254.169.254/latest/meta-data/public-ipv4 >> index.html\n",
+                                "echo '</h3></html>' >> index.html\n",
+                                "echo '<html><h1>Another Health Checker: OK</h1><img src='https://d5zbgtndvsb4j.cloudfront.net/Rick-Roll-796x394.png '/><h3>' > index2.html\n",
+                                "curl 169.254.169.254/latest/meta-data/public-ipv4 >> index2.html\n",
+                                "echo '</h3></html>' >> index2.html\n",
+                                "yum install -y aws-cfn-bootstrap\n"
+                            ]
+                        ]
+                    }
+                },
+                "SecurityGroups": [
+                    {
+                        "Ref": "WebServerSecurityGroup"
+                    }
+                ]
+            },
+            "Metadata": {
+                "AWS::CloudFormation::Init": {
+                    "configSets": {
+                        "All": [
+                            "ConfigureSampleApp"
+                        ]
+                    },
+                    "ConfigureSampleApp": {
+                        "packages": {
+                            "yum": {
+                                "httpd": []
+                            }
+                        },
+                        "services": {
+                            "sysvinit": {
+                                "httpd": {
+                                    "enabled": "true",
+                                    "ensureRunning": "true"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "PublicLoadBalancerSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupDescription": "Public Elastic Load Balancing security group with HTTP access on port 80 from the Internet",
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "80",
+                        "ToPort": "80",
+                        "CidrIp": "0.0.0.0/0"
+                    }
+                ],
+                "SecurityGroupEgress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "80",
+                        "ToPort": "80",
+                        "CidrIp": "0.0.0.0/0"
+                    }
+                ],
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            },
+            "Metadata": {
+            }
+        },
+        "PublicElasticLoadBalancer": {
+            "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+            "Properties": {
+                "Type": "application",
+                "Scheme": "internet-facing",
+                "Subnets": [
+                    {
+                        "Ref": "PublicSubnet"
+                    },
+                    {
+                        "Ref": "PublicSubnet2"
+                    }
+                ],
+                "SecurityGroups": [
+                    {
+                        "Ref": "PublicLoadBalancerSecurityGroup"
+                    }
+                ]
+            },
+            "Metadata": {
+            }
+        },
+        "ALBListener": {
+            "Type": "AWS::ElasticLoadBalancingV2::Listener",
+            "Properties": {
+                "DefaultActions": [
+                    {
+                        "Type": "forward",
+                        "TargetGroupArn": {
+                            "Ref": "ALBTargetGroup"
+                        }
+                    }
+                ],
+                "LoadBalancerArn": {
+                    "Ref": "PublicElasticLoadBalancer"
+                },
+                "Port": "80",
+                "Protocol": "HTTP"
+            },
+            "Metadata": {
+            }
+        },
+        "ALBTargetGroup": {
+            "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+            "Properties": {
+                "HealthCheckPath": "/index.html",
+                "HealthCheckIntervalSeconds": 10,
+                "HealthCheckTimeoutSeconds": 5,
+                "HealthyThresholdCount": 3,
+                "Port": 80,
+                "Protocol": "HTTP",
+                "UnhealthyThresholdCount": 5,
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            },
+            "Metadata": {
+            }
+        },
+        "PublicSubnet2": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "AvailabilityZone": "us-west-1c",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "CidrBlock": "10.0.1.0/24"
+            },
+            "Metadata": {
+            }
+        },
+        "WebServerFleet2": {
+            "Type": "AWS::AutoScaling::AutoScalingGroup",
+            "Properties": {
+                "MinSize": "1",
+                "MaxSize": "10",
+                "DesiredCapacity": {
+                    "Ref": "WebServerCount"
+                },
+                "VPCZoneIdentifier": [
+                    {
+                        "Ref": "PublicSubnet2"
+                    }, {"Ref": "PublicSubnet"}
+                ],
+                "LaunchConfigurationName": {
+                    "Ref": "WebServerLaunchConfig2"
+                },
+                "TargetGroupARNs": [
+                    {
+                        "Ref": "ALBTargetGroup2"
+                    }
+                ]
+            },
+            "Metadata": {
+            },
+            "DependsOn": [
+                "PublicRoute"
+            ]
+        },
+        "WebServerLaunchConfig2": {
+            "Type": "AWS::AutoScaling::LaunchConfiguration",
+            "Properties": {
+                "InstanceType": {
+                    "Ref": "InstanceType"
+                },
+                "ImageId": {
+                    "Fn::FindInMap": [
+                        "AWSRegionArch2AMI",
+                        {
+                            "Ref": "AWS::Region"
+                        },
+                        {
+                            "Fn::FindInMap": [
+                                "AWSInstanceType2Arch",
+                                {
+                                    "Ref": "InstanceType"
+                                },
+                                "Arch"
+                            ]
+                        }
+                    ]
+                },
+                "KeyName": {
+                    "Ref": "KeyName"
+                },
+                "AssociatePublicIpAddress": "true",
+                "UserData": {
+                    "Fn::Base64": {
+                        "Fn::Join": [
+                            "",
+                            [
+                                "#!/bin/bash -xe\n",
+                                "yum install httpd -y\n",
+                                "service httpd start && chkconfig httpd on\n",
+                                "cd /var/www/html\n",
+                                "echo '<html><h1>Another Health Checker: OK</h1><img src='https://d5zbgtndvsb4j.cloudfront.net/Rick-Roll-796x394.png '/><h3>' > index.html\n",
+                                "curl 169.254.169.254/latest/meta-data/public-ipv4 >> index.html\n",
+                                "echo '</h3></html>' >> index.html\n",
+                                "yum install -y aws-cfn-bootstrap\n"
+                            ]
+                        ]
+                    }
+                },
+                "SecurityGroups": [
+                    {
+                        "Ref": "WebServerSecurityGroup"
+                    }
+                ]
+            },
+            "Metadata": {
+                "AWS::CloudFormation::Init": {
+                    "configSets": {
+                        "All": [
+                            "ConfigureSampleApp"
+                        ]
+                    },
+                    "ConfigureSampleApp": {
+                        "packages": {
+                            "yum": {
+                                "httpd": []
+                            }
+                        },
+                        "services": {
+                            "sysvinit": {
+                                "httpd": {
+                                    "enabled": "true",
+                                    "ensureRunning": "true"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "ALBTargetGroup2": {
+            "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+            "Properties": {
+                "HealthCheckPath": "/index.html",
+                "HealthCheckIntervalSeconds": 10,
+                "HealthCheckTimeoutSeconds": 5,
+                "HealthyThresholdCount": 3,
+                "Port": 80,
+                "Protocol": "HTTP",
+                "UnhealthyThresholdCount": 5,
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            },
+            "Metadata": {
+            }
+        },
+        "ALBListenerRule": {
+            "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+            "Properties": {
+                "ListenerArn": {
+                    "Ref": "ALBListener"
+                },
+                "Actions": [
+                    {
+                        "Type": "forward",
+                        "TargetGroupArn": {
+                            "Ref": "ALBTargetGroup2"
+                        }
+                    }
+                ],
+                "Conditions": [
+                    {
+                        "Field": "query-string",
+                        "QueryStringConfig": {
+                            "Values": [
+                                {
+                                    "Key": "switch",
+                                    "Value": "true"
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "Priority": 1
+            },
+            "Metadata": {
+            }
+        },
+        "EC2SRTAEY3J": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "PublicRouteTable"
+                },
+                "SubnetId": {
+                    "Ref": "PublicSubnet2"
+                }
+            },
+            "Metadata": {
+            }
+        }
+    },
+    "Parameters": {
+        "WebServerCount": {
+            "Description": "Number of Amazon EC2 instances to launch for each of the WebServerFleet ASGs. There are currently 2, so the total is double the input value.",
+            "Type": "Number",
+            "Default": "2"
+        },
+        "InstanceType": {
+            "Description": "WebServer EC2 instance type",
+            "Type": "String",
+            "Default": "t3.nano",
+            "AllowedValues": [
+                "t1.micro",
+                "t2.nano",
+                "t2.micro",
+                "t2.small",
+                "t2.medium",
+                "t2.large",
+                "t3.nano",
+                "m1.small",
+                "m1.medium",
+                "m1.large",
+                "m1.xlarge",
+                "m2.xlarge",
+                "m2.2xlarge",
+                "m2.4xlarge",
+                "m3.medium",
+                "m3.large",
+                "m3.xlarge",
+                "m3.2xlarge",
+                "m4.large",
+                "m4.xlarge",
+                "m4.2xlarge",
+                "m4.4xlarge",
+                "m4.10xlarge",
+                "c1.medium",
+                "c1.xlarge",
+                "c3.large",
+                "c3.xlarge",
+                "c3.2xlarge",
+                "c3.4xlarge",
+                "c3.8xlarge",
+                "c4.large",
+                "c4.xlarge",
+                "c4.2xlarge",
+                "c4.4xlarge",
+                "c4.8xlarge",
+                "g2.2xlarge",
+                "g2.8xlarge",
+                "r3.large",
+                "r3.xlarge",
+                "r3.2xlarge",
+                "r3.4xlarge",
+                "r3.8xlarge",
+                "i2.xlarge",
+                "i2.2xlarge",
+                "i2.4xlarge",
+                "i2.8xlarge",
+                "d2.xlarge",
+                "d2.2xlarge",
+                "d2.4xlarge",
+                "d2.8xlarge",
+                "hi1.4xlarge",
+                "hs1.8xlarge",
+                "cr1.8xlarge",
+                "cc2.8xlarge",
+                "cg1.4xlarge"
+            ],
+            "ConstraintDescription": "must be a valid EC2 instance type."
+        },
+        "KeyName": {
+            "Description": "Name of an EC2 KeyPair to enable SSH access to the instance.",
+            "Type": "AWS::EC2::KeyPair::KeyName",
+            "ConstraintDescription": "must be the name of an existing EC2 KeyPair."
+        },
+        "SSHLocation": {
+            "Description": " The IP address range that can be used to access the web server using SSH.",
+            "Type": "String",
+            "MinLength": "9",
+            "MaxLength": "18",
+            "Default": "0.0.0.0/0",
+            "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+            "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+        }
+    },
+    "Mappings": {
+        "AWSInstanceType2Arch": {
+            "t1.micro": {
+                "Arch": "HVM64"
+            },
+            "t2.nano": {
+                "Arch": "HVM64"
+            },
+            "t2.micro": {
+                "Arch": "HVM64"
+            },
+            "t2.small": {
+                "Arch": "HVM64"
+            },
+            "t2.medium": {
+                "Arch": "HVM64"
+            },
+            "t2.large": {
+                "Arch": "HVM64"
+            },
+            "t3.nano": {
+                "Arch": "HVM64"
+            },
+            "m1.small": {
+                "Arch": "HVM64"
+            },
+            "m1.medium": {
+                "Arch": "HVM64"
+            },
+            "m1.large": {
+                "Arch": "HVM64"
+            },
+            "m1.xlarge": {
+                "Arch": "HVM64"
+            },
+            "m2.xlarge": {
+                "Arch": "HVM64"
+            },
+            "m2.2xlarge": {
+                "Arch": "HVM64"
+            },
+            "m2.4xlarge": {
+                "Arch": "HVM64"
+            },
+            "m3.medium": {
+                "Arch": "HVM64"
+            },
+            "m3.large": {
+                "Arch": "HVM64"
+            },
+            "m3.xlarge": {
+                "Arch": "HVM64"
+            },
+            "m3.2xlarge": {
+                "Arch": "HVM64"
+            },
+            "m4.large": {
+                "Arch": "HVM64"
+            },
+            "m4.xlarge": {
+                "Arch": "HVM64"
+            },
+            "m4.2xlarge": {
+                "Arch": "HVM64"
+            },
+            "m4.4xlarge": {
+                "Arch": "HVM64"
+            },
+            "m4.10xlarge": {
+                "Arch": "HVM64"
+            },
+            "c1.medium": {
+                "Arch": "HVM64"
+            },
+            "c1.xlarge": {
+                "Arch": "HVM64"
+            },
+            "c3.large": {
+                "Arch": "HVM64"
+            },
+            "c3.xlarge": {
+                "Arch": "HVM64"
+            },
+            "c3.2xlarge": {
+                "Arch": "HVM64"
+            },
+            "c3.4xlarge": {
+                "Arch": "HVM64"
+            },
+            "c3.8xlarge": {
+                "Arch": "HVM64"
+            },
+            "c4.large": {
+                "Arch": "HVM64"
+            },
+            "c4.xlarge": {
+                "Arch": "HVM64"
+            },
+            "c4.2xlarge": {
+                "Arch": "HVM64"
+            },
+            "c4.4xlarge": {
+                "Arch": "HVM64"
+            },
+            "c4.8xlarge": {
+                "Arch": "HVM64"
+            },
+            "g2.2xlarge": {
+                "Arch": "HVMG2"
+            },
+            "g2.8xlarge": {
+                "Arch": "HVMG2"
+            },
+            "r3.large": {
+                "Arch": "HVM64"
+            },
+            "r3.xlarge": {
+                "Arch": "HVM64"
+            },
+            "r3.2xlarge": {
+                "Arch": "HVM64"
+            },
+            "r3.4xlarge": {
+                "Arch": "HVM64"
+            },
+            "r3.8xlarge": {
+                "Arch": "HVM64"
+            },
+            "i2.xlarge": {
+                "Arch": "HVM64"
+            },
+            "i2.2xlarge": {
+                "Arch": "HVM64"
+            },
+            "i2.4xlarge": {
+                "Arch": "HVM64"
+            },
+            "i2.8xlarge": {
+                "Arch": "HVM64"
+            },
+            "d2.xlarge": {
+                "Arch": "HVM64"
+            },
+            "d2.2xlarge": {
+                "Arch": "HVM64"
+            },
+            "d2.4xlarge": {
+                "Arch": "HVM64"
+            },
+            "d2.8xlarge": {
+                "Arch": "HVM64"
+            },
+            "hi1.4xlarge": {
+                "Arch": "HVM64"
+            },
+            "hs1.8xlarge": {
+                "Arch": "HVM64"
+            },
+            "cr1.8xlarge": {
+                "Arch": "HVM64"
+            },
+            "cc2.8xlarge": {
+                "Arch": "HVM64"
+            }
+        },
+        "AWSRegionArch2AMI": {
+            "us-east-1": {
+                "HVM64": "ami-0ff8a91507f77f867",
+                "HVMG2": "ami-0a584ac55a7631c0c"
+            },
+            "us-west-2": {
+                "HVM64": "ami-a0cfeed8",
+                "HVMG2": "ami-0e09505bc235aa82d"
+            },
+            "us-west-1": {
+                "HVM64": "ami-0bdb828fd58c52235",
+                "HVMG2": "ami-066ee5fd4a9ef77f1"
+            },
+            "eu-west-1": {
+                "HVM64": "ami-047bb4163c506cd98",
+                "HVMG2": "ami-0a7c483d527806435"
+            },
+            "eu-west-2": {
+                "HVM64": "ami-f976839e",
+                "HVMG2": "NOT_SUPPORTED"
+            },
+            "eu-west-3": {
+                "HVM64": "ami-0ebc281c20e89ba4b",
+                "HVMG2": "NOT_SUPPORTED"
+            },
+            "eu-central-1": {
+                "HVM64": "ami-0233214e13e500f77",
+                "HVMG2": "ami-06223d46a6d0661c7"
+            },
+            "ap-northeast-1": {
+                "HVM64": "ami-06cd52961ce9f0d85",
+                "HVMG2": "ami-053cdd503598e4a9d"
+            },
+            "ap-northeast-2": {
+                "HVM64": "ami-0a10b2721688ce9d2",
+                "HVMG2": "NOT_SUPPORTED"
+            },
+            "ap-northeast-3": {
+                "HVM64": "ami-0d98120a9fb693f07",
+                "HVMG2": "NOT_SUPPORTED"
+            },
+            "ap-southeast-1": {
+                "HVM64": "ami-08569b978cc4dfa10",
+                "HVMG2": "ami-0be9df32ae9f92309"
+            },
+            "ap-southeast-2": {
+                "HVM64": "ami-09b42976632b27e9b",
+                "HVMG2": "ami-0a9ce9fecc3d1daf8"
+            },
+            "ap-south-1": {
+                "HVM64": "ami-0912f71e06545ad88",
+                "HVMG2": "ami-097b15e89dbdcfcf4"
+            },
+            "us-east-2": {
+                "HVM64": "ami-0b59bfac6be064b78",
+                "HVMG2": "NOT_SUPPORTED"
+            },
+            "ca-central-1": {
+                "HVM64": "ami-0b18956f",
+                "HVMG2": "NOT_SUPPORTED"
+            },
+            "sa-east-1": {
+                "HVM64": "ami-07b14488da8ea02a0",
+                "HVMG2": "NOT_SUPPORTED"
+            },
+            "cn-north-1": {
+                "HVM64": "ami-0a4eaf6c4454eda75",
+                "HVMG2": "NOT_SUPPORTED"
+            },
+            "cn-northwest-1": {
+                "HVM64": "ami-6b6a7d09",
+                "HVMG2": "NOT_SUPPORTED"
+            }
+        }
+    },
+    "Outputs": {
+        "URL": {
+            "Value": {
+                "Fn::GetAtt": [
+                    "PublicElasticLoadBalancer",
+                    "DNSName"
+                ]
+            },
+            "Description": "Static Page Link"
+        }
+    }
+}
